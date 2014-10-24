@@ -4,7 +4,8 @@ import sys
 from pymongo import MongoClient
 from datetime import datetime
 import ast
-import subprocess
+import os
+#import subprocess
 
 def data_to_str(data):
     if isinstance(data,(str,unicode)):
@@ -79,8 +80,8 @@ class recordingsList(QListWidget):
 
     def open_selected(self):
         file = self.selectedItems()[0].text()
-        print file
-        subprocess.call(('ssh kkong -Y arfview %s'%file).split())
+        os.system('ssh kkong -Y arfview %s'%file)
+#        subprocess.call(('ssh kkong -Y arfview %s'%file).split())
 
     def copy_selected(self):
         pass
