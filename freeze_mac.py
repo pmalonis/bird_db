@@ -52,7 +52,7 @@ def main():
 
 
     executables = [
-        Executable('mainwin_window.py', base=base, targetName='Colony Database')
+        Executable('main_window.py', base=base, targetName='Colony Database')
     ]
 
     mac_options = dict(bundle_name = 'arfview')
