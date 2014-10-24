@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.bird_tab, 'Birds')
 
         self.setCentralWidget(self.tab_widget)
+        self.resize(800,600)
         self.show()
 
     def connectDatabase(self):
@@ -81,7 +82,7 @@ class recordingsList(QListWidget):
     def open_selected(self):
         file = self.selectedItems()[0].text()
         os.system('ssh kkong -Y arfview %s'%file)
-#        subprocess.call(('ssh kkong -Y arfview %s'%file).split())
+    #subprocess.call(('ssh kkong -Y arfview %s'%file).split())
 
     def copy_selected(self):
         pass
