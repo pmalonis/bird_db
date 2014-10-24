@@ -4,6 +4,7 @@ import sys
 from pymongo import MongoClient
 from datetime import datetime
 import ast
+import subprocess
 
 def data_to_str(data):
     if isinstance(data,(str,unicode)):
@@ -58,7 +59,31 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(e.message)
                 QMessageBox.critical(self,"Connection Error", "Could not connect to database")
+
+class recordingsList(QListWidget):
+    def __init__(self, *args, **kwargs):
+        super(recordingsList, self).__init__(*args, **kwargs)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.onCustomConextMenuRequested)
     
+    def onCustomConextMenuRequested(self, pos):
+        menu = QMenu(self)
+        menu.setParent(self)
+        openAction = QAction("Open with Arfview", menu)
+        openAction.triggered.connect(self.open_selected)
+        copyAction = QAction("Copy", menu)
+        openAction.triggered.connect(self.copy_selected)
+        menu.addAction(openAction)
+        menu.addAction(copyAction)
+        menu.exec_(self.mapToGlobal(pos))
+
+    def open_selected(self):
+        file = self.selectedItems()[0].text()
+        print file
+        subprocess.call(('ssh kkong -Y arfview %s'%file).split())
+
+    def copy_selected(self):
+        pass
 
 class birdTab(QWidget):
     def __init__(self, collection=None):
@@ -99,22 +124,33 @@ class birdTab(QWidget):
     def populateTable(self, cursor):
         '''The bird table contains data from a mongo query.  The results of the 
             query are passed to the function as a cursor object.'''
-
+        
         self.table.setRowCount(cursor.count())
         self.table.setVerticalHeaderLabels([str(i) for i in xrange(1,cursor.count()+1)])
         column_names = list(set(field for doc in cursor for field in doc.keys() 
-                                if field not in ('name','_id')))
-        column_names.insert(0,'name') #ensures that 'name' is first column
+                                if field not in ('name','_id','recordings')))
+        column_names.insert(0,'name') #ensures that 'name' is first column 
+        column_names.insert(len(column_names),'recordings')
         self.table.setColumnCount(len(column_names))
         self.table.setHorizontalHeaderLabels(column_names)
         cursor.rewind()
+        self.recording_lists = []
         for row,doc in enumerate(cursor):
             for column in xrange(self.table.columnCount()):
                 field = self.table.horizontalHeaderItem(column).text()
                 data = doc.get(field)
-                item = QTableWidgetItem(data_to_str(data))
-                self.table.setItem(row,column,item)  
-                self.table.setColumnWidth(column,150)
+                if field == 'recordings' and type(data)==list:
+                    new_list = recordingsList()
+                    for recording in data:
+                        new_list.addItem(recording)
+                    self.recording_lists.append(new_list)
+                    self.table.setCellWidget(row,column,new_list)
+                else:
+                    item = QTableWidgetItem(data_to_str(data))  
+                    self.table.setItem(row,column,item)  
+                    self.table.setColumnWidth(column,200)
+                    self.table.setRowHeight(row, 40)
+
 
     def queryPressed(self):
         self.setQuery(self.query_edit.text())
