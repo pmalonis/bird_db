@@ -5,7 +5,9 @@ from pymongo import MongoClient
 from datetime import datetime
 import ast
 import os
+from breedingTableModel import breedingTableModel
 #import subprocess
+
 
 def data_to_str(data):
     if isinstance(data,(str,unicode)):
@@ -21,20 +23,20 @@ def clear_doc_values(doc):
         if type(doc[key]) == dict:
             clear_doc_values(doc[key])
         else:
-            doc[key] = None        
+            doc[key] = None
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super(MainWindow, self).__init__()
         self.client = None
         self.db = None
-        #self.connectDatabase('trex',27017,'test_db')
         self.initUI()
+        self.connectDatabase('trex',27017,'test_db')
 
     def initUI(self):
         self.toolbar = self.addToolBar('Toolbar')
         self.toolbar.addAction('Exit', qApp.quit)
-        self.toolbar.addAction('Connect', self.connectDatabase)
+        self.toolbar.addAction('Connect', self.showConnectionDialog)
         self.tab_widget = QTabWidget()
 
         self.breeding_tab = breedingTab()
@@ -47,20 +49,26 @@ class MainWindow(QMainWindow):
         self.resize(800,600)
         self.show()
 
-    def connectDatabase(self):
+    def showConnectionDialog(self):
         dialog = connectionDialog()
         if dialog.exec_() == QDialog.Accepted:
             try:
                 hostname = dialog.hostname.text()
                 port = int(dialog.port.text())
                 db_name = dialog.db_name.text()
-                self.client = MongoClient(hostname, port)
-                self.db = self.client[db_name]
-                self.bird_tab.setCollection(self.db.birds)
-                self.breeding_tab.setCollection(self.db.breeding)
+                self.connectDatabase(hostname, port, db_name)
             except Exception as e:
                 print(e.message)
                 QMessageBox.critical(self,"Connection Error", "Could not connect to database")
+
+        self.bird_tab.setCollection(self.db.birds)
+        self.breeding_tab.setCollection(self.db.breeding)
+
+    def connectDatabase(self, hostname, port, db_name):
+        self.client = MongoClient(hostname, port)
+        self.db = self.client[db_name]
+        self.bird_tab.setCollection(self.db.birds)
+        self.breeding_tab.setCollection(self.db.breeding)
 
 class recordingsList(QListWidget):
     def __init__(self, *args, **kwargs):
@@ -167,22 +175,23 @@ class birdTab(QWidget):
 class breedingTab(QDialog):
     def __init__(self, collection=None):
         super(breedingTab,self).__init__()
-        self.initUI()                        
+        self.initUI()  
         self.setCollection(collection)
 
     def initUI(self):
         self.layout = QVBoxLayout()
-        self.table = QTableWidget()
+        self.table = QTableView()#QTableWidget()
         self.table.setSortingEnabled(False)
         self.table.setStyleSheet("QTableWidget::item{selection-background-color: red}")
-        self.table.setEditTriggers(QAbstractItemView.DoubleClicked)
+        #self.table.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.toolbar = QToolBar()
         self.toolbar.addWidget(QLabel("Date:"))
         self.date_edit = QDateEdit()
-        self.date_edit.dateChanged.connect(self.changeDate)
         self.toolbar.addWidget(self.date_edit)
-        self.toolbar.addAction('Save', self.save)
-        self.toolbar.addAction('Discard Changes', self.discard)
+        # self.toolbar.addAction('Save', self.save)
+        # self.toolbar.addAction('Discard Changes', self.discard)
+        self.toolbar.addAction(QIcon('icons/edit-undo.png'),'Undo', self.undo)
+        self.toolbar.addAction(QIcon('icons/edit-redo.png'),'Redo', self.redo)
         self.layout.addWidget(self.table)
         self.layout.addWidget(self.toolbar)
         self.setLayout(self.layout)
@@ -190,9 +199,13 @@ class breedingTab(QDialog):
     def setCollection(self, collection):
         self.collection = collection
         if collection is not None:
-            last_date = self.collection.find_one(sort=[('date',-1)])['date']
-            self.changeDate(last_date)
-            self.date_edit.setDateTime(last_date)
+            #creating model
+            model = breedingTableModel(self.collection)
+            model.dateChanged.connect(self.date_edit.setDate)
+            self.date_edit.setDate(model.date)
+            self.date_edit.dateChanged.connect(model.setDate)
+            self.table.setModel(model)
+#            self.date_edit.setDateTime(last_date)
 
     def populateTable(self,doc):
         '''Adds breeding information to the breeding table.  The breeding info for a single day
@@ -201,7 +214,10 @@ class breedingTab(QDialog):
         row_names = [key for key in doc.keys() if key not in ('date','_id')]
         row_names.sort()
         self.table.setRowCount(len(row_names))
-        self.table.setVerticalHeaderLabels(row_names)
+        for row,name in enumerate(row_names): 
+            header = QTableWidgetItem(name)
+            header.setFlags(Qt.ItemIsEditable | Qt.ItemIsEnabled)
+            self.table.setVerticalHeaderItem(row, header)
         column_names = list(set(field for n in row_names for field in doc[n].keys()))
         self.table.setColumnCount(len(column_names))
         self.table.setHorizontalHeaderLabels(column_names)
@@ -213,36 +229,23 @@ class breedingTab(QDialog):
                 item = QTableWidgetItem(data_to_str(data))
                 self.table.setItem(row,column,item)   
 
-    def changeDate(self, date):
-        '''Sets the currently visible date to the date represented by a qdatetime'''
-        if isinstance(date, QDate):
-            python_dt = datetime.combine(date.toPython(), datetime.min.time())
-        elif isinstance(date, QDateTime):
-            python_dt = date.toPython()
-        elif isinstance(date, datetime):
-            python_dt = date
-        else:
-            raise TypeError('date argument must be python datetime or QDateTime')
-
-        doc = self.collection.find_one({'date':python_dt})
-        if doc == None:  # creating new document for date with fields of closest date
-            id = self.collection.insert({})
-            template = self.collection.find_one({'date':{'$lt':python_dt}},sort=[('date',-1)])
-            if template is None:
-                template = self.collection.find_one({'date':{'$gt':python_dt}},sort=[('date',1)])
-
-            clear_doc_values(template)
-            template.pop('_id')
-            self.collection.update({'_id':id},template)
-            doc = self.collection.find_one({'_id':id})
+    def undo(self):
+        model = self.table.model() 
+        if model is not None:
+            model.undo_stack.undo()
             
-        self.populateTable(doc)
+    def redo(self):
+        model = self.table.model() 
+        if model is not None:
+            model.undo_stack.redo()
 
-    def save(self):
-        pass
+    # def save(self):
+    #     for column in len(self.table.columnCount()):
+    #         for row in len(self.table.rowCount()):
+    #             self.table.item(row,columnt).text()
 
-    def discard(self):
-        pass 
+    # def discard(self):
+    #     pass 
 
 class connectionDialog(QDialog):
     def __init__(self):
